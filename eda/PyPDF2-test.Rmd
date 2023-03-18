@@ -1,0 +1,229 @@
+---
+title: "Testing Out PyPDF2"
+author: "David West"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Set-Up
+```{r r-setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(reticulate)
+```
+
+```{python py-setup}
+import pandas as pd
+from pyprojroot.here import here
+from PyPDF2 import PdfReader, PdfWriter
+```
+
+# Metadata
+## Reading metadata
+```{python}
+reader = PdfReader(here('doc/MIL-A-8625F_AMENDMENT-1.PDF'))
+
+meta = reader.metadata
+
+print(len(reader.pages))
+
+# All of the following could be None!
+print(meta.author)
+print(meta.creator)
+print(meta.producer)
+print(meta.subject)
+print(meta.title)
+```
+
+## Writing metadata
+```{python, include=FALSE}
+reader = PdfReader(here('doc/MIL-A-8625F_AMENDMENT-1.PDF'))
+writer = PdfWriter()
+
+# Add all pages to the writer
+for page in reader.pages:
+  writer.add_page(page)
+
+# Add the metadata
+writer.add_metadata(
+  {
+    "/Author": "Nick Kroll",
+    "/Producer": "Mel Brooks",
+  }
+)
+
+# Save the new PDF to a file
+with open(here('doc/meta-pdf.pdf'), "wb") as f:
+  writer.write(f)
+```
+
+# Extract Text from a PDF
+```{python}
+reader = PdfReader(here('doc/MIL-A-8625F_AMENDMENT-1.PDF'))
+page = reader.pages[0]
+print(page.extract_text())
+```
+
+```{python}
+# extract only text oriented up
+print(page.extract_text(0))
+
+# extract text oriented up and turned left
+print(page.extract_text(0, 90))
+```
+
+
+## Using a visitor
+
+Example 1: Ignore header and footer
+
+```{python}
+reader = PdfReader(here('doc/GeoBase_NHNC1_Data_Model_UML_EN.pdf'))
+page = reader.pages[3]
+
+parts = []
+
+
+def visitor_body(text, cm, tm, fontDict, fontSize):
+    y = tm[5]
+    if y > 50 and y < 720:
+        parts.append(text)
+
+
+page.extract_text(visitor_text=visitor_body)
+text_body = "".join(parts)
+
+print("Without header and footer ----------")
+print(text_body)
+```
+
+
+Example 2: Extract rectangles and texts into a SVG-file
+```{python}
+import svgwrite
+
+reader = PdfReader(here('doc/GeoBase_NHNC1_Data_Model_UML_EN.pdf'))
+page = reader.pages[2]
+
+dwg = svgwrite.Drawing(here("doc/GeoBase_test.svg"), profile="tiny")
+
+
+def visitor_svg_rect(op, args, cm, tm):
+    if op == b"re":
+        (x, y, w, h) = (args[i].as_numeric() for i in range(4))
+        dwg.add(dwg.rect((x, y), (w, h), stroke="red", fill_opacity=0.05))
+
+
+def visitor_svg_text(text, cm, tm, fontDict, fontSize):
+    (x, y) = (tm[4], tm[5])
+    dwg.add(dwg.text(text, insert=(x, y), fill="blue"))
+
+
+page.extract_text(
+    visitor_operand_before=visitor_svg_rect, visitor_text=visitor_svg_text
+)
+dwg.save()
+```
+
+# Extract Images
+```{python}
+reader = PdfReader(here('doc/GeoBase_NHNC1_Data_Model_UML_EN.pdf'))
+page = reader.pages[8]
+count = 0
+
+for image_file_object in page.images:
+    with open(here('doc/'+str(count) + image_file_object.name), "wb") as fp:
+        fp.write(image_file_object.data)
+        count += 1
+```
+
+# Adding PDF Annotations
+## Attachments
+```{python}
+writer = PdfWriter()
+writer.add_blank_page(width=200, height=200)
+
+data = b"any bytes - typically read from a file"
+writer.add_attachment("smile.png", data)
+
+with open(here("doc/output.pdf"), "wb") as output_stream:
+    writer.write(output_stream)
+```
+
+## Free Text
+```{python, include=FALSE}
+from PyPDF2 import PdfReader, PdfWriter
+from PyPDF2.generic import AnnotationBuilder
+
+# Fill the writer with the pages you want
+reader = PdfReader(here('doc/MIL-A-8625F_AMENDMENT-1.PDF'))
+writer = PdfWriter()
+
+# Add all pages to the writer
+for page in reader.pages:
+  writer.add_page(page)
+
+# Create the annotation and add it
+writer.add_annotation(
+  page_number=0, 
+  annotation=AnnotationBuilder.free_text(
+    "Hello World\nThis is the second line!",
+    rect=(50, 550, 200, 650),
+    font="Arial",
+    bold=True,
+    italic=True,
+    font_size="20pt",
+    font_color="00ff00",
+    border_color="0000ff",
+    background_color="cdcdcd",
+  )
+)
+
+# Add the line
+writer.add_annotation(
+  page_number=1, 
+  annotation= AnnotationBuilder.line(
+    text="Hello World\nLine2",
+    rect=(50, 550, 200, 650),
+    p1=(50, 550),
+    p2=(200, 650),
+)
+
+# Add a rectangle
+writer.add_annotation(
+  page_number=2, 
+  annotation=AnnotationBuilder.rectangle(
+    rect=(40, 450, 100, 550),
+  )
+)
+
+# Write the annotated file to disk
+with open(here('doc/annotated-MIL-A-8625F_AMENDMENT-1.PDF'), "wb") as fp:
+    writer.write(fp)
+```
+
+## Line
+```{python, include=FALSE}
+from PyPDF2 import PdfReader, PdfWriter
+from PyPDF2.generic import AnnotationBuilder
+
+# Fill the writer with the pages you want
+reader = PdfReader(here('doc/MIL-A-8625F_AMENDMENT-1.PDF'))
+page = reader.pages[0]
+writer = PdfWriter()
+
+# Add all pages to the writer
+for page in reader.pages:
+  writer.add_page(page)
+
+# Add the line
+annotation = AnnotationBuilder.line(
+    p1=(50, 550),
+    p2=(200, 650),
+)
+writer.add_annotation(page_number=0, annotation=annotation)
+
+# Write the annotated file to disk
+with open(here('doc/line-MIL-A-8625F_AMENDMENT-1.PDF'), "wb") as fp:
+    writer.write(fp)
+```
+
